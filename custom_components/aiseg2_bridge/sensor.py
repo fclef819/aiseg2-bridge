@@ -14,10 +14,10 @@ from .const import DOMAIN
 JST = timezone(timedelta(hours=9))
 
 TOTAL_KEYS = [
-    ("total_use_kwh", "Total Energy Today"),
-    ("buy_kwh", "Purchased Energy Today"),
-    ("sell_kwh", "Sold Energy Today"),
-    ("gen_kwh", "Generated Energy Today"),
+    ("total_use_kwh", "Total Energy Today（電力量）"),
+    ("buy_kwh", "Purchased Energy Today（電力量）"),
+    ("sell_kwh", "Sold Energy Today（電力量）"),
+    ("gen_kwh", "Generated Energy Today（電力量）"),
 ]
 
 
@@ -104,7 +104,7 @@ class CircuitEnergySensor(_DailyTotalSensor):
         super().__init__(coordinator, entry, host)
         self._cid = str(cid)
         self._cname = cname
-        self._attr_name = cname
+        self._attr_name = f"{cname}（電力量）"
         self._attr_unique_id = f"{DOMAIN}-{host}-c{self._cid}"
         # Set explicit entity_id
         self.entity_id = f"sensor.aiseg2_bridge_c{self._cid}"
@@ -128,7 +128,7 @@ class TemperatureSensor(_Base):
     def __init__(self, coordinator, entry: ConfigEntry, host: str, sensor_id: str, room_name: str):
         super().__init__(coordinator, entry, host)
         self._sensor_id = sensor_id
-        self._attr_name = f"{room_name} Temperature"
+        self._attr_name = f"{room_name}（温度）"
         self._attr_unique_id = f"{DOMAIN}-{host}-environment-{sensor_id}-temperature"
         self.entity_id = f"sensor.aiseg2_bridge_environment_{sensor_id}_temperature"
 
@@ -146,7 +146,7 @@ class HumiditySensor(_Base):
     def __init__(self, coordinator, entry: ConfigEntry, host: str, sensor_id: str, room_name: str):
         super().__init__(coordinator, entry, host)
         self._sensor_id = sensor_id
-        self._attr_name = f"{room_name} Humidity"
+        self._attr_name = f"{room_name}（湿度）"
         self._attr_unique_id = f"{DOMAIN}-{host}-environment-{sensor_id}-humidity"
         self.entity_id = f"sensor.aiseg2_bridge_environment_{sensor_id}_humidity"
 
@@ -179,7 +179,7 @@ class CurrentPowerSensor(_Base):
 
     def __init__(self, coordinator, entry: ConfigEntry, host: str):
         super().__init__(coordinator, entry, host)
-        self._attr_name = "Current Power Usage"
+        self._attr_name = "Current Power Usage（電力）"
         self._attr_unique_id = f"{DOMAIN}-{host}-current-power"
         self.entity_id = "sensor.aiseg2_bridge_current_power_usage"
 
@@ -196,7 +196,7 @@ class CircuitPowerSensor(_Base):
     def __init__(self, coordinator, entry: ConfigEntry, host: str, circuit_id: str, circuit_name: str):
         super().__init__(coordinator, entry, host)
         self._circuit_id = str(circuit_id)
-        self._attr_name = f"{circuit_name} Power"
+        self._attr_name = f"{circuit_name}（電力）"
         self._attr_unique_id = f"{DOMAIN}-{host}-c{self._circuit_id}-power"
         self.entity_id = f"sensor.aiseg2_bridge_c{self._circuit_id}_power"
 
