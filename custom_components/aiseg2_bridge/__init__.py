@@ -27,6 +27,8 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 # Regex for number extraction
 _NUM = re.compile(r"([0-9]+(?:\.[0-9]+)?)")
+_AIR_DEVICE_INFO = re.compile(r"var\s+deviceInfo\s*=\s*(\[.*?\]);", re.DOTALL)
+_AIR_DEVICE_COUNT = re.compile(r"var\s+deviceCnt\s*=\s*(\d+)")
 
 
 def _to_float(s: Optional[str]) -> float:
@@ -96,12 +98,16 @@ class AiSeg2Client:
 
     async def _get_html_texts(self, path: str, xpath: str) -> List[str]:
         """Fetch HTML and extract text using XPath."""
+        root = await self._get_html(path)
+        return [t for t in root.xpath(xpath) if isinstance(t, str)]
+
+    async def _get_html(self, path: str):
+        """Fetch and parse an AiSEG2 HTML page."""
         await self._ensure_client()
         try:
             r = await self._client.get(path)
             r.raise_for_status()
-            root = html.fromstring(r.content)
-            return [t for t in root.xpath(xpath) if isinstance(t, str)]
+            return html.fromstring(r.content)
         except httpx.TimeoutException:
             _LOGGER.warning("Timeout accessing %s on %s", path, self._cfg.host)
             raise
@@ -114,6 +120,89 @@ class AiSeg2Client:
             else:
                 _LOGGER.error("HTTP %d error from %s%s", err.response.status_code, self._cfg.host, path)
             raise
+
+    @staticmethod
+    def _parse_display_number(card, class_name: str) -> Optional[float]:
+        """Parse an AiSEG2 digit-display element into a numeric value."""
+        displays = card.xpath(
+            f'.//div[contains(concat(" ", normalize-space(@class), " "), " {class_name} ")]'
+        )
+        if not displays:
+            return None
+
+        display = displays[0]
+        if "hidden" in (display.get("style") or ""):
+            return None
+
+        value = ""
+        for digit in display.xpath("./div"):
+            classes = digit.get("class") or ""
+            if "num_dot" in classes:
+                value += "."
+            elif "num" in classes:
+                if "no_minus" in classes:
+                    value += "-"
+                else:
+                    match = re.search(r"(?:^|\s)no([0-9])(?:\s|$)", classes)
+                    if match:
+                        value += match.group(1)
+
+        try:
+            return float(value) if value and value not in {"-", ".", "-."} else None
+        except ValueError:
+            _LOGGER.warning("Failed to parse air environment value '%s'", value)
+            return None
+
+    @classmethod
+    def _parse_air_environment_page(cls, root) -> tuple[int, list[dict[str, Any]]]:
+        """Extract room metadata and temperature/humidity values from one page."""
+        scripts = root.xpath("//script/text()")
+        script_text = "\n".join(text for text in scripts if isinstance(text, str))
+        count_match = _AIR_DEVICE_COUNT.search(script_text)
+        info_match = _AIR_DEVICE_INFO.search(script_text)
+        if not count_match or not info_match:
+            return 0, []
+
+        try:
+            device_info = json.loads(info_match.group(1))
+        except json.JSONDecodeError:
+            _LOGGER.warning("Unable to parse air environment device metadata")
+            return 0, []
+
+        cards = root.xpath(
+            '//div[contains(concat(" ", normalize-space(@class), " "), " base ")]'
+            '[.//div[contains(concat(" ", normalize-space(@class), " "), " txt_place ")]]'
+        )
+        readings: list[dict[str, Any]] = []
+        for metadata, card in zip(device_info, cards):
+            devices = metadata.get("array", [])
+            node_id = next((str(item["nodeId"]) for item in devices if "nodeId" in item), None)
+            if not node_id:
+                continue
+            room_names = card.xpath(
+                './/div[contains(concat(" ", normalize-space(@class), " "), " txt_place ")]/text()'
+            )
+            readings.append(
+                {
+                    "id": node_id,
+                    "name": "".join(room_names).strip() or str(metadata.get("name") or node_id),
+                    "temperature": cls._parse_display_number(card, "num_ond"),
+                    "humidity": cls._parse_display_number(card, "num_shitudo"),
+                }
+            )
+        return int(count_match.group(1)), readings
+
+    async def fetch_temperature_humidity(self) -> dict[str, dict[str, Any]]:
+        """Fetch temperature and humidity sensors configured in AiSEG2."""
+        first_page = await self._get_html("/page/airenvironment/42?page=1")
+        device_count, readings = self._parse_air_environment_page(first_page)
+        readings_by_id = {reading["id"]: reading for reading in readings}
+
+        for page in range(2, (device_count + 2) // 3 + 1):
+            root = await self._get_html(f"/page/airenvironment/42?page={page}")
+            _, page_readings = self._parse_air_environment_page(root)
+            readings_by_id.update({reading["id"]: reading for reading in page_readings})
+        return readings_by_id
 
     async def fetch_totals(self) -> Dict[str, float]:
         """Fetch today's total energy values (kWh)."""
@@ -235,6 +324,16 @@ class AiSeg2DataUpdateCoordinator(DataUpdateCoordinator):
             totals = await self._fetch_with_retry(self.client.fetch_totals, "fetch total energy values")
             _LOGGER.debug("Total energy values: %s", totals)
 
+            try:
+                environment = await self._fetch_with_retry(
+                    self.client.fetch_temperature_humidity,
+                    "fetch temperature and humidity",
+                    max_retries=2,
+                )
+            except Exception as err:
+                _LOGGER.warning("Failed to fetch temperature and humidity: %s", err)
+                environment = {}
+
             # Fetch per-circuit values
             circuit_data = {}
             for circuit in self.circuits:
@@ -264,6 +363,7 @@ class AiSeg2DataUpdateCoordinator(DataUpdateCoordinator):
             result = {
                 "totals": totals,
                 "circuits": circuit_data,
+                "environment": environment,
                 "last_reset": last_reset.isoformat(),
                 "timestamp": now.isoformat(),
             }

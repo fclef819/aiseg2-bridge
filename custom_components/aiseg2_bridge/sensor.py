@@ -5,7 +5,7 @@ from typing import Optional
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy
+from homeassistant.const import PERCENTAGE, UnitOfEnergy, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -35,6 +35,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         circuits = coordinator.data.get("circuits", {})
         for cid, cdata in circuits.items():
             ents.append(CircuitEnergySensor(coordinator, entry, host, cid, cdata["name"]))
+        for sensor_id, sensor_data in coordinator.data.get("environment", {}).items():
+            ents.append(TemperatureSensor(coordinator, entry, host, sensor_id, sensor_data["name"]))
+            ents.append(HumiditySensor(coordinator, entry, host, sensor_id, sensor_data["name"]))
 
     async_add_entities(ents)
 
@@ -100,3 +103,39 @@ class CircuitEnergySensor(_Base):
         if circuit_data:
             return float(circuit_data.get("kwh", 0))
         return None
+
+
+class TemperatureSensor(_Base):
+    _attr_device_class = "temperature"
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_state_class = "measurement"
+
+    def __init__(self, coordinator, entry: ConfigEntry, host: str, sensor_id: str, room_name: str):
+        super().__init__(coordinator, entry, host)
+        self._sensor_id = sensor_id
+        self._attr_name = f"{room_name} Temperature"
+        self._attr_unique_id = f"{DOMAIN}-{host}-environment-{sensor_id}-temperature"
+        self.entity_id = f"sensor.aiseg2_bridge_environment_{sensor_id}_temperature"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        data = self.coordinator.data.get("environment", {}).get(self._sensor_id, {})
+        return data.get("temperature")
+
+
+class HumiditySensor(_Base):
+    _attr_device_class = "humidity"
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_state_class = "measurement"
+
+    def __init__(self, coordinator, entry: ConfigEntry, host: str, sensor_id: str, room_name: str):
+        super().__init__(coordinator, entry, host)
+        self._sensor_id = sensor_id
+        self._attr_name = f"{room_name} Humidity"
+        self._attr_unique_id = f"{DOMAIN}-{host}-environment-{sensor_id}-humidity"
+        self.entity_id = f"sensor.aiseg2_bridge_environment_{sensor_id}_humidity"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        data = self.coordinator.data.get("environment", {}).get(self._sensor_id, {})
+        return data.get("humidity")
