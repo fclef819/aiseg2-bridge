@@ -46,3 +46,23 @@ def test_parse_air_environment_page_handles_hidden_values() -> None:
 
     assert readings[0]["temperature"] is None
     assert readings[0]["humidity"] == 40.0
+
+
+def test_parse_bath_auto_state() -> None:
+    root = html.fromstring(
+        """
+        <div class="panel">
+          <div class="kiki_title">エコキュート</div>
+          <div class="kiki_state"><div class="state off"></div>
+            <div class="state on bath_disp_on">自動中</div></div>
+        </div>
+        """
+    )
+
+    assert AiSeg2Client._parse_bath_auto(root) is True
+
+
+def test_parse_bath_auto_returns_none_without_ecocute() -> None:
+    root = html.fromstring('<div class="panel"><div class="kiki_title">シャッター</div></div>')
+
+    assert AiSeg2Client._parse_bath_auto(root) is None

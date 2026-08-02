@@ -23,7 +23,7 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 # Regex for number extraction
 _NUM = re.compile(r"([0-9]+(?:\.[0-9]+)?)")
@@ -204,6 +204,32 @@ class AiSeg2Client:
             readings_by_id.update({reading["id"]: reading for reading in page_readings})
         return readings_by_id
 
+    @staticmethod
+    def _parse_bath_auto(root) -> Optional[bool]:
+        """Extract the automatic bath state from the EcoCute device panel."""
+        panels = root.xpath('//div[contains(concat(" ", normalize-space(@class), " "), " panel ")]')
+        for panel in panels:
+            title = "".join(panel.xpath('.//div[contains(@class, "kiki_title")]//text()')).strip()
+            if "エコキュート" not in title:
+                continue
+            states = panel.xpath(
+                './/div[contains(concat(" ", normalize-space(@class), " "), " state ") '
+                'and contains(concat(" ", normalize-space(@class), " "), " bath_disp_on ")]'
+            )
+            if not states:
+                return None
+            classes = set((states[0].get("class") or "").split())
+            if "on" in classes:
+                return True
+            if "off" in classes:
+                return False
+            return None
+        return None
+
+    async def fetch_bath_auto(self) -> Optional[bool]:
+        """Fetch the current automatic bath state, if an EcoCute is configured."""
+        return self._parse_bath_auto(await self._get_html("/page/devices/device/32"))
+
     async def fetch_totals(self) -> Dict[str, float]:
         """Fetch today's total energy values (kWh)."""
         return {
@@ -334,6 +360,16 @@ class AiSeg2DataUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.warning("Failed to fetch temperature and humidity: %s", err)
                 environment = {}
 
+            try:
+                bath_auto = await self._fetch_with_retry(
+                    self.client.fetch_bath_auto,
+                    "fetch bath auto state",
+                    max_retries=2,
+                )
+            except Exception as err:
+                _LOGGER.warning("Failed to fetch bath auto state: %s", err)
+                bath_auto = None
+
             # Fetch per-circuit values
             circuit_data = {}
             for circuit in self.circuits:
@@ -364,6 +400,7 @@ class AiSeg2DataUpdateCoordinator(DataUpdateCoordinator):
                 "totals": totals,
                 "circuits": circuit_data,
                 "environment": environment,
+                "bath_auto": bath_auto,
                 "last_reset": last_reset.isoformat(),
                 "timestamp": now.isoformat(),
             }
