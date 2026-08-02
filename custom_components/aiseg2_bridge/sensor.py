@@ -38,6 +38,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         for sensor_id, sensor_data in coordinator.data.get("environment", {}).items():
             ents.append(TemperatureSensor(coordinator, entry, host, sensor_id, sensor_data["name"]))
             ents.append(HumiditySensor(coordinator, entry, host, sensor_id, sensor_data["name"]))
+        if coordinator.data.get("water_usage_m3") is not None:
+            ents.append(WaterUsageSensor(coordinator, entry, host))
 
     async_add_entities(ents)
 
@@ -139,3 +141,19 @@ class HumiditySensor(_Base):
     def native_value(self) -> Optional[float]:
         data = self.coordinator.data.get("environment", {}).get(self._sensor_id, {})
         return data.get("humidity")
+
+
+class WaterUsageSensor(_Base):
+    _attr_device_class = "water"
+    _attr_native_unit_of_measurement = "m³"
+    _attr_state_class = "total"
+
+    def __init__(self, coordinator, entry: ConfigEntry, host: str):
+        super().__init__(coordinator, entry, host)
+        self._attr_name = "Water Usage Today"
+        self._attr_unique_id = f"{DOMAIN}-{host}-water-usage-m3"
+        self.entity_id = "sensor.aiseg2_bridge_water_usage_today"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        return self.coordinator.data.get("water_usage_m3")

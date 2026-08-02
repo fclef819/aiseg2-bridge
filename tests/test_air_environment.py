@@ -66,3 +66,15 @@ def test_parse_bath_auto_returns_none_without_ecocute() -> None:
     root = html.fromstring('<div class="panel"><div class="kiki_title">シャッター</div></div>')
 
     assert AiSeg2Client._parse_bath_auto(root) is None
+
+
+def test_parse_water_usage() -> None:
+    root = html.fromstring('<span id="val_kwh">0.110</span>')
+
+    assert AiSeg2Client._parse_graph_value(root) == 0.11
+
+
+def test_parse_water_usage_returns_none_when_not_configured() -> None:
+    root = html.fromstring("<html></html>")
+
+    assert AiSeg2Client._parse_graph_value(root) is None

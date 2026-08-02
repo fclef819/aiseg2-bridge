@@ -230,6 +230,16 @@ class AiSeg2Client:
         """Fetch the current automatic bath state, if an EcoCute is configured."""
         return self._parse_bath_auto(await self._get_html("/page/devices/device/32"))
 
+    @staticmethod
+    def _parse_graph_value(root) -> Optional[float]:
+        """Extract the primary numeric value from an AiSEG2 graph page."""
+        values = root.xpath('//span[@id="val_kwh"]/text()')
+        return _to_float(values[0]) if values else None
+
+    async def fetch_water_usage(self) -> Optional[float]:
+        """Fetch today's water usage in cubic metres."""
+        return self._parse_graph_value(await self._get_html("/page/graph/56111"))
+
     async def fetch_totals(self) -> Dict[str, float]:
         """Fetch today's total energy values (kWh)."""
         return {
@@ -370,6 +380,16 @@ class AiSeg2DataUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.warning("Failed to fetch bath auto state: %s", err)
                 bath_auto = None
 
+            try:
+                water_usage_m3 = await self._fetch_with_retry(
+                    self.client.fetch_water_usage,
+                    "fetch water usage",
+                    max_retries=2,
+                )
+            except Exception as err:
+                _LOGGER.warning("Failed to fetch water usage: %s", err)
+                water_usage_m3 = None
+
             # Fetch per-circuit values
             circuit_data = {}
             for circuit in self.circuits:
@@ -401,6 +421,7 @@ class AiSeg2DataUpdateCoordinator(DataUpdateCoordinator):
                 "circuits": circuit_data,
                 "environment": environment,
                 "bath_auto": bath_auto,
+                "water_usage_m3": water_usage_m3,
                 "last_reset": last_reset.isoformat(),
                 "timestamp": now.isoformat(),
             }
