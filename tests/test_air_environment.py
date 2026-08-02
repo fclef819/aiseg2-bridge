@@ -78,3 +78,22 @@ def test_parse_water_usage_returns_none_when_not_configured() -> None:
     root = html.fromstring("<html></html>")
 
     assert AiSeg2Client._parse_graph_value(root) is None
+
+
+def test_parse_current_power_converts_kw_to_w() -> None:
+    assert AiSeg2Client._parse_current_power({"measReg": 1, "u_capacity": "2.8"}) == 2800.0
+    assert AiSeg2Client._parse_current_power({"measReg": 0, "u_capacity": "2.8"}) is None
+
+
+def test_parse_circuit_power_page() -> None:
+    root = html.fromstring(
+        """
+        <div id="stage_1"><div class="c_value"> 1859W</div>
+          <div class="c_device">キッチン<br />食器洗乾燥機</div></div>
+        <div id="stage_2"><div class="c_value"></div><div class="c_device">未使用</div></div>
+        """
+    )
+
+    assert AiSeg2Client._parse_circuit_power_page(root) == [
+        {"name": "キッチン食器洗乾燥機", "power_w": 1859.0}
+    ]

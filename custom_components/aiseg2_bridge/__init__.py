@@ -111,6 +111,23 @@ class AiSeg2Client:
         except httpx.TimeoutException:
             _LOGGER.warning("Timeout accessing %s on %s", path, self._cfg.host)
             raise
+
+    async def _post_json(self, path: str) -> dict[str, Any]:
+        """Fetch a JSON payload from an AiSEG2 read-only update endpoint."""
+        await self._ensure_client()
+        try:
+            response = await self._client.post(path)
+            response.raise_for_status()
+            return response.json()
+        except httpx.TimeoutException:
+            _LOGGER.warning("Timeout accessing %s on %s", path, self._cfg.host)
+            raise
+        except httpx.ConnectError:
+            _LOGGER.error("Connection failed to %s for path %s", self._cfg.host, path)
+            raise
+        except httpx.HTTPStatusError as err:
+            _LOGGER.error("HTTP %d error from %s%s", err.response.status_code, self._cfg.host, path)
+            raise
         except httpx.ConnectError:
             _LOGGER.error("Connection failed to %s for path %s", self._cfg.host, path)
             raise
@@ -239,6 +256,55 @@ class AiSeg2Client:
     async def fetch_water_usage(self) -> Optional[float]:
         """Fetch today's water usage in cubic metres."""
         return self._parse_graph_value(await self._get_html("/page/graph/56111"))
+
+    @staticmethod
+    def _parse_current_power(payload: dict[str, Any]) -> Optional[float]:
+        """Extract whole-home current power in watts from the update response."""
+        if payload.get("measReg") != 1:
+            return None
+        value = payload.get("u_capacity")
+        if value in (None, "", "-"):
+            return None
+        try:
+            return float(value) * 1000
+        except (TypeError, ValueError):
+            _LOGGER.warning("Failed to parse current power value '%s'", value)
+            return None
+
+    async def fetch_current_power(self) -> Optional[float]:
+        """Fetch whole-home current power in watts."""
+        return self._parse_current_power(await self._post_json("/data/electricflow/111/update"))
+
+    @staticmethod
+    def _normalize_circuit_name(name: str) -> str:
+        """Normalize a display name for matching against the circuit catalog."""
+        return re.sub(r"\s+", "", name).replace("・", "")
+
+    @classmethod
+    def _parse_circuit_power_page(cls, root) -> list[dict[str, Any]]:
+        """Extract named circuit current-power readings from one circuit page."""
+        readings: list[dict[str, Any]] = []
+        for stage in root.xpath('//div[starts-with(@id, "stage_")]'):
+            names = stage.xpath('.//div[contains(concat(" ", normalize-space(@class), " "), " c_device ")]//text()')
+            values = stage.xpath('.//div[contains(concat(" ", normalize-space(@class), " "), " c_value ")]/text()')
+            name = "".join(names).strip()
+            value = "".join(values).strip()
+            if not name or not value:
+                continue
+            match = _NUM.search(value)
+            if not match:
+                _LOGGER.warning("Failed to parse circuit power value '%s' for '%s'", value, name)
+                continue
+            readings.append({"name": name, "power_w": float(match.group(1))})
+        return readings
+
+    async def fetch_circuit_power(self) -> list[dict[str, Any]]:
+        """Fetch current power readings for all circuit display pages."""
+        readings: list[dict[str, Any]] = []
+        for page in range(1, 4):
+            root = await self._get_html(f"/page/electricflow/1113?id={page}")
+            readings.extend(self._parse_circuit_power_page(root))
+        return readings
 
     async def fetch_totals(self) -> Dict[str, float]:
         """Fetch today's total energy values (kWh)."""
@@ -390,6 +456,39 @@ class AiSeg2DataUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.warning("Failed to fetch water usage: %s", err)
                 water_usage_m3 = None
 
+            try:
+                current_power_w = await self._fetch_with_retry(
+                    self.client.fetch_current_power,
+                    "fetch current power",
+                    max_retries=2,
+                )
+            except Exception as err:
+                _LOGGER.warning("Failed to fetch current power: %s", err)
+                current_power_w = None
+
+            try:
+                raw_circuit_power = await self._fetch_with_retry(
+                    self.client.fetch_circuit_power,
+                    "fetch circuit current power",
+                    max_retries=2,
+                )
+            except Exception as err:
+                _LOGGER.warning("Failed to fetch circuit current power: %s", err)
+                raw_circuit_power = []
+
+            catalog_by_name: dict[str, list[str]] = {}
+            for circuit in self.circuits:
+                catalog_by_name.setdefault(self.client._normalize_circuit_name(circuit["name"]), []).append(circuit["id"])
+            circuit_power: dict[str, float] = {}
+            for reading in raw_circuit_power:
+                matching_ids = catalog_by_name.get(self.client._normalize_circuit_name(reading["name"]), [])
+                if len(matching_ids) == 1:
+                    circuit_power[matching_ids[0]] = reading["power_w"]
+                elif matching_ids:
+                    _LOGGER.warning("Skipping ambiguous circuit power reading for '%s'", reading["name"])
+                else:
+                    _LOGGER.debug("No circuit catalog match for current power reading '%s'", reading["name"])
+
             # Fetch per-circuit values
             circuit_data = {}
             for circuit in self.circuits:
@@ -422,6 +521,8 @@ class AiSeg2DataUpdateCoordinator(DataUpdateCoordinator):
                 "environment": environment,
                 "bath_auto": bath_auto,
                 "water_usage_m3": water_usage_m3,
+                "current_power_w": current_power_w,
+                "circuit_power": circuit_power,
                 "last_reset": last_reset.isoformat(),
                 "timestamp": now.isoformat(),
             }

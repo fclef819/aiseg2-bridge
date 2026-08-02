@@ -29,12 +29,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     # 合計系
     for key, name in TOTAL_KEYS:
         ents.append(TotalEnergySensor(coordinator, entry, host, key, name))
+    if coordinator.data and coordinator.data.get("current_power_w") is not None:
+        ents.append(CurrentPowerSensor(coordinator, entry, host))
 
     # 回路系
     if coordinator.data:
         circuits = coordinator.data.get("circuits", {})
         for cid, cdata in circuits.items():
             ents.append(CircuitEnergySensor(coordinator, entry, host, cid, cdata["name"]))
+            if cid in coordinator.data.get("circuit_power", {}):
+                ents.append(CircuitPowerSensor(coordinator, entry, host, cid, cdata["name"]))
         for sensor_id, sensor_data in coordinator.data.get("environment", {}).items():
             ents.append(TemperatureSensor(coordinator, entry, host, sensor_id, sensor_data["name"]))
             ents.append(HumiditySensor(coordinator, entry, host, sensor_id, sensor_data["name"]))
@@ -157,3 +161,36 @@ class WaterUsageSensor(_Base):
     @property
     def native_value(self) -> Optional[float]:
         return self.coordinator.data.get("water_usage_m3")
+
+
+class CurrentPowerSensor(_Base):
+    _attr_device_class = "power"
+    _attr_native_unit_of_measurement = "W"
+    _attr_state_class = "measurement"
+
+    def __init__(self, coordinator, entry: ConfigEntry, host: str):
+        super().__init__(coordinator, entry, host)
+        self._attr_name = "Current Power Usage"
+        self._attr_unique_id = f"{DOMAIN}-{host}-current-power"
+        self.entity_id = "sensor.aiseg2_bridge_current_power_usage"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        return self.coordinator.data.get("current_power_w")
+
+
+class CircuitPowerSensor(_Base):
+    _attr_device_class = "power"
+    _attr_native_unit_of_measurement = "W"
+    _attr_state_class = "measurement"
+
+    def __init__(self, coordinator, entry: ConfigEntry, host: str, circuit_id: str, circuit_name: str):
+        super().__init__(coordinator, entry, host)
+        self._circuit_id = str(circuit_id)
+        self._attr_name = f"{circuit_name} Power"
+        self._attr_unique_id = f"{DOMAIN}-{host}-c{self._circuit_id}-power"
+        self.entity_id = f"sensor.aiseg2_bridge_c{self._circuit_id}_power"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        return self.coordinator.data.get("circuit_power", {}).get(self._circuit_id)
