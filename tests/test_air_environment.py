@@ -3,6 +3,12 @@
 from lxml import html
 
 from custom_components.aiseg2_bridge import AiSeg2Client
+from custom_components.aiseg2_bridge.sensor import (
+    CircuitPowerSensor,
+    HumiditySensor,
+    TemperatureSensor,
+    WaterUsageSensor,
+)
 
 
 def test_parse_air_environment_page() -> None:
@@ -97,3 +103,10 @@ def test_parse_circuit_power_page() -> None:
     assert AiSeg2Client._parse_circuit_power_page(root) == [
         {"name": "キッチン食器洗乾燥機", "power_w": 1859.0}
     ]
+
+
+def test_last_reset_is_only_provided_by_daily_total_sensors() -> None:
+    assert "last_reset" not in TemperatureSensor.__dict__
+    assert "last_reset" not in HumiditySensor.__dict__
+    assert "last_reset" not in CircuitPowerSensor.__dict__
+    assert "last_reset" in WaterUsageSensor.__mro__[1].__dict__

@@ -49,9 +49,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
 
 class _Base(CoordinatorEntity, SensorEntity):
-    _attr_device_class = "energy"
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_state_class = "total"  # デイリーでリセットされる累積
     _attr_has_entity_name = True
 
     def __init__(self, coordinator, entry: ConfigEntry, host: str):
@@ -68,13 +65,22 @@ class _Base(CoordinatorEntity, SensorEntity):
             "model": "AiSEG2",
         }
 
+class _DailyTotalSensor(_Base):
+    """Base class for values that reset at midnight JST."""
+
+    _attr_state_class = "total"
+
     @property
     def last_reset(self) -> datetime:
+        """Return the start of the current AiSEG2 reporting day."""
         now = datetime.now(JST)
         return now.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=JST)
 
 
-class TotalEnergySensor(_Base):
+class TotalEnergySensor(_DailyTotalSensor):
+    _attr_device_class = "energy"
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
     def __init__(self, coordinator, entry: ConfigEntry, host: str, key: str, disp_name: str):
         super().__init__(coordinator, entry, host)
         self._key = key
@@ -90,7 +96,10 @@ class TotalEnergySensor(_Base):
         return float(v) if v is not None else None
 
 
-class CircuitEnergySensor(_Base):
+class CircuitEnergySensor(_DailyTotalSensor):
+    _attr_device_class = "energy"
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
     def __init__(self, coordinator, entry: ConfigEntry, host: str, cid: str, cname: str):
         super().__init__(coordinator, entry, host)
         self._cid = str(cid)
@@ -147,7 +156,7 @@ class HumiditySensor(_Base):
         return data.get("humidity")
 
 
-class WaterUsageSensor(_Base):
+class WaterUsageSensor(_DailyTotalSensor):
     _attr_device_class = "water"
     _attr_native_unit_of_measurement = "m³"
     _attr_state_class = "total"
