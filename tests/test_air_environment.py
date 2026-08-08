@@ -1,4 +1,7 @@
-"""Tests for AiSEG2 air environment parsing."""
+"""Tests for AiSEG2 sensor parsing and setup."""
+
+import asyncio
+from types import SimpleNamespace
 
 from lxml import html
 
@@ -8,6 +11,7 @@ from custom_components.aiseg2_bridge.sensor import (
     HumiditySensor,
     TemperatureSensor,
     WaterUsageSensor,
+    async_setup_entry,
 )
 
 
@@ -110,3 +114,26 @@ def test_last_reset_is_only_provided_by_daily_total_sensors() -> None:
     assert "last_reset" not in HumiditySensor.__dict__
     assert "last_reset" not in CircuitPowerSensor.__dict__
     assert "last_reset" in WaterUsageSensor.__mro__[1].__dict__
+
+
+def test_setup_adds_power_entities_for_inactive_circuits() -> None:
+    class Coordinator:
+        data = {
+            "totals": {},
+            "circuits": {
+                "1": {"name": "稼働中回路", "kwh": 1.0},
+                "2": {"name": "停止中回路", "kwh": 0.0},
+            },
+            "circuit_power": {"1": 100.0},
+        }
+
+        def async_add_listener(self, _listener, _context=None):
+            return lambda: None
+
+    entry = SimpleNamespace(entry_id="entry", data={"host": "aiseg.local"})
+    hass = SimpleNamespace(data={"aiseg2_bridge": {"entry": Coordinator()}})
+    entities = []
+
+    asyncio.run(async_setup_entry(hass, entry, entities.extend))
+
+    assert {entity._circuit_id for entity in entities if isinstance(entity, CircuitPowerSensor)} == {"1", "2"}

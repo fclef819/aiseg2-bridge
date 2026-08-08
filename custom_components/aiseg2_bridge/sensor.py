@@ -37,8 +37,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         circuits = coordinator.data.get("circuits", {})
         for cid, cdata in circuits.items():
             ents.append(CircuitEnergySensor(coordinator, entry, host, cid, cdata["name"]))
-            if cid in coordinator.data.get("circuit_power", {}):
-                ents.append(CircuitPowerSensor(coordinator, entry, host, cid, cdata["name"]))
+            # AiSEG2 omits c_value for inactive circuits. Create the entity
+            # regardless so it becomes available when the circuit next draws power.
+            ents.append(CircuitPowerSensor(coordinator, entry, host, cid, cdata["name"]))
         for sensor_id, sensor_data in coordinator.data.get("environment", {}).items():
             ents.append(TemperatureSensor(coordinator, entry, host, sensor_id, sensor_data["name"]))
             ents.append(HumiditySensor(coordinator, entry, host, sensor_id, sensor_data["name"]))
