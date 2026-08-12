@@ -78,6 +78,26 @@ def test_parse_bath_auto_returns_none_without_ecocute() -> None:
     assert AiSeg2Client._parse_bath_auto(root) is None
 
 
+def test_parse_delivery_box_state() -> None:
+    empty_root = html.fromstring(
+        '<div class="panel"><div class="kiki_title">宅配ボックス</div>'
+        '<div class="kiki_val"><span>荷物なし</span></div></div>'
+    )
+    occupied_root = html.fromstring(
+        '<div class="panel"><div class="kiki_title">宅配ボックス</div>'
+        '<div class="kiki_val"><span>荷物あり</span></div></div>'
+    )
+
+    assert AiSeg2Client._parse_delivery_box(empty_root) is False
+    assert AiSeg2Client._parse_delivery_box(occupied_root) is True
+
+
+def test_parse_delivery_box_returns_none_when_not_configured() -> None:
+    root = html.fromstring('<div class="panel"><div class="kiki_title">シャッター</div></div>')
+
+    assert AiSeg2Client._parse_delivery_box(root) is None
+
+
 def test_parse_water_usage() -> None:
     root = html.fromstring('<span id="val_kwh">0.110</span>')
 

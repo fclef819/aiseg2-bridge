@@ -248,6 +248,31 @@ class AiSeg2Client:
         return self._parse_bath_auto(await self._get_html("/page/devices/device/32"))
 
     @staticmethod
+    def _parse_delivery_box(root) -> Optional[bool]:
+        """Extract whether the delivery box contains a package."""
+        panels = root.xpath('//div[contains(concat(" ", normalize-space(@class), " "), " panel ")]')
+        for panel in panels:
+            title = "".join(panel.xpath('.//div[contains(@class, "kiki_title")]//text()')).strip()
+            if "宅配ボックス" not in title:
+                continue
+            status = "".join(
+                panel.xpath('.//div[contains(@class, "kiki_val")]//text()')
+            ).strip()
+            if not status:
+                return None
+            return "荷物なし" not in status
+        return None
+
+    async def fetch_delivery_box(self) -> Optional[bool]:
+        """Fetch whether the configured delivery box contains a package."""
+        return self._parse_delivery_box(await self._get_html("/page/devices/device/32"))
+
+    async def fetch_device_states(self) -> tuple[Optional[bool], Optional[bool]]:
+        """Fetch EcoCute and delivery-box states from the shared device page."""
+        root = await self._get_html("/page/devices/device/32")
+        return self._parse_bath_auto(root), self._parse_delivery_box(root)
+
+    @staticmethod
     def _parse_graph_value(root) -> Optional[float]:
         """Extract the primary numeric value from an AiSEG2 graph page."""
         values = root.xpath('//span[@id="val_kwh"]/text()')
@@ -437,14 +462,15 @@ class AiSeg2DataUpdateCoordinator(DataUpdateCoordinator):
                 environment = {}
 
             try:
-                bath_auto = await self._fetch_with_retry(
-                    self.client.fetch_bath_auto,
-                    "fetch bath auto state",
+                bath_auto, delivery_box_occupied = await self._fetch_with_retry(
+                    self.client.fetch_device_states,
+                    "fetch device states",
                     max_retries=2,
                 )
             except Exception as err:
-                _LOGGER.warning("Failed to fetch bath auto state: %s", err)
+                _LOGGER.warning("Failed to fetch device states: %s", err)
                 bath_auto = None
+                delivery_box_occupied = None
 
             try:
                 water_usage_m3 = await self._fetch_with_retry(
@@ -520,6 +546,7 @@ class AiSeg2DataUpdateCoordinator(DataUpdateCoordinator):
                 "circuits": circuit_data,
                 "environment": environment,
                 "bath_auto": bath_auto,
+                "delivery_box_occupied": delivery_box_occupied,
                 "water_usage_m3": water_usage_m3,
                 "current_power_w": current_power_w,
                 "circuit_power": circuit_power,
