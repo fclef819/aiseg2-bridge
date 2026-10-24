@@ -314,7 +314,10 @@ class AiSeg2Client:
             values = stage.xpath('.//div[contains(concat(" ", normalize-space(@class), " "), " c_value ")]/text()')
             name = "".join(names).strip()
             value = "".join(values).strip()
-            if not name or not value:
+            if not name:
+                continue
+            if not value:
+                readings.append({"name": name, "power_w": 0.0})
                 continue
             match = _NUM.search(value)
             if not match:

@@ -125,7 +125,8 @@ def test_parse_circuit_power_page() -> None:
     )
 
     assert AiSeg2Client._parse_circuit_power_page(root) == [
-        {"name": "キッチン食器洗乾燥機", "power_w": 1859.0}
+        {"name": "キッチン食器洗乾燥機", "power_w": 1859.0},
+        {"name": "未使用", "power_w": 0.0},
     ]
 
 
